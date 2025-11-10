@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高校生物 バイオーム学習シミュレーター</title>
+    <!-- Tailwind CSSのロード -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* グローバルフォント設定と基本スタイル */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+            color: #1f2937; /* Dark Gray */
+            padding: 1rem;
+            min-height: 100vh;
+        }
+
+        /* ★ 追加: バイオーム画像コンテナ */
+        #imageContainer {
+            background-color: #e0e0e0; /* 画像ロード中の背景 */
+            padding-bottom: 56.25%; /* 16:9 アスペクト比 */
+        }
+        .biome-image {
+            transition: opacity 0.5s ease-in-out; /* 0.5秒のフェード */
+        }
+
+
+        /* スライダーの見た目をカスタマイズ */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #d1d5db;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4f46e5; /* Indigo */
+            cursor: pointer;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+            transition: background 0.3s;
+        }
+
+        input[type=range]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4f46e5;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+        }
+
+        /* ボタンの共通スタイル */
+        .biome-button {
+            transition: all 0.2s;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .biome-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .biome-button:active {
+            transform: translateY(0);
+        }
+
+        /* LLMボタン用の特殊スタイル */
+        .llm-button {
+            background-color: #f59e0b; /* Amber */
+            color: white;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .llm-button:hover {
+            background-color: #d97706;
+        }
+
+        /* モーダル背景 */
+        dialog::backdrop {
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        
+        /* ローディングアニメーション */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4f46e5;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="app" class="max-w-4xl mx-auto">
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-extrabold text-indigo-700">🌍 バイオーム学習シミュレーター</h1>
+            <p class="text-gray-600 mt-1">環境要因を操作して、植生の変化とバイオームを観察しよう</p>
+        </header>
+
+        <!-- メインコンテンツエリア (モバイルでは縦並び、デスクトップでは横並び) -->
+        <div class="md:flex md:space-x-6">
+
+            <!-- 1. コントロールパネル (左側/上側) -->
+            <div class="md:w-1/3 bg-white p-6 rounded-xl shadow-lg mb-6 md:mb-0 space-y-4">
+                <h2 class="text-xl font-bold text-gray-800 mb-4 border-b pb-2">環境要因コントロール</h2>
+
+                <!-- 降水量スライダー -->
+                <div class="slider-group">
+                    <label for="precipitation" class="block text-sm font-medium text-gray-700">年降水量: <span id="precValue" class="font-semibold text-indigo-600">1500</span> mm</label>
+                    <input type="range" id="precipitation" min="0" max="4000" step="10" value="1500" class="w-full">
+                </div>
+
+                <!-- 気温スライダー -->
+                <div class="slider-group mt-4">
+                    <label for="temperature" class="block text-sm font-medium text-gray-700">年平均気温: <span id="tempValue" class="font-semibold text-indigo-600">10.0</span> °C</label>
+                    <input type="range" id="temperature" min="-15" max="30" step="0.5" value="10" class="w-full">
+                </div>
+
+                <!-- 操作ボタン -->
+                <div class="flex space-x-4 pt-4 border-t mt-6">
+                    <button id="resetButton" class="biome-button flex-1 py-2 px-4 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium">初期値に戻す</button>
+                    <button id="randomButton" class="biome-button flex-1 py-2 px-4 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 font-medium">ランダム設定</button>
+                </div>
+                
+                <!-- Gemini API機能ボタン -->
+                <div class="pt-4 border-t mt-6 space-y-2">
+                    <h3 class="text-sm font-bold text-gray-800">✨ Gemini AI アシスタント</h3>
+                    <button id="quizButton" class="biome-button llm-button w-full py-2 px-4 rounded-lg">✨ このバイオームのクイズ</button>
+                    <button id="exploreButton" class="biome-button llm-button w-full py-2 px-4 rounded-lg">✨ もっと詳しく調べる</button>
+                </div>
+            </div>
+
+            <!-- 2. Canvas描画と情報パネル (右側/下側) -->
+            <div class="md:w-2/3 space-y-6">
+                <!-- バイオーム画像コンテナ -->
+                <div id="imageContainer" class="w-full relative rounded-xl shadow-lg overflow-hidden">
+                    <!-- 画像はJavaScriptによってフェード切り替えされます -->
+                    <img id="biomeImageBack" src="" alt="バイオームのイメージ" class="biome-image absolute top-0 left-0 w-full h-full object-cover opacity-0">
+                    <img id="biomeImageFront" src="" alt="バイオームのイメージ" class="biome-image absolute top-0 left-0 w-full h-full object-cover opacity-100">
+                </div>
+
+                <!-- 情報表示パネル -->
+                <div id="infoPanel" class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-indigo-500">
+                    <h2 id="biomeName" class="text-2xl font-extrabold text-indigo-800 mb-2">熱帯多雨林</h2>
+                    <p id="biomeDescription" class="text-gray-700 mb-3 leading-relaxed">
+                        年中高温多湿で、多層構造の巨大な常緑広葉樹林。
+                    </p>
+                    <div class="text-sm">
+                        <span class="font-semibold text-gray-600">代表例:</span>
+                        <span id="biomeExamples" class="text-gray-700">フタバガキ, オオゴマダラ, 類人猿</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- フッター -->
+        <footer class="mt-8 text-center text-sm text-gray-500">
+            <!-- ヒントは削除されました -->
+        </footer>
+
+    </div>
+
+    <!-- モーダルダイアログ (結果表示用) -->
+    <dialog id="resultModal" class="p-6 rounded-xl shadow-2xl w-full max-w-lg">
+        <h3 id="modalTitle" class="text-xl font-bold mb-4 text-indigo-700">結果</h3>
+        <div id="modalContent" class="mb-6 overflow-y-auto max-h-96 text-gray-700">
+            <!-- 結果がここに挿入されます -->
+            <div class="loader mx-auto"></div>
+            <p id="modalMessage" class="text-center mt-4">AIが回答を生成中です...</p>
+        </div>
+        <button id="modalCloseButton" class="w-full py-2 px-4 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium">閉じる</button>
+    </dialog>
+
+    <script>
+        // ===============================================
+        // JavaScript / マップロジック
+        // ===============================================
+
+        // ★ 更新: BIOMES_DATA の画像ファイル名をすべて半角英数字に変更
+        const BIOMES_DATA = {
+            '熱帯多雨林': { P: 3000, T: 25, description: '年中高温多湿で、多層構造の巨大な常緑広葉樹林。', examples: ['フタバガキ', 'オオゴマダラ', '類人猿'], colors: { ground: '#006400' }, 
+                imageSrc: 'subtropical_rainforest.jpg' }, // ★ 変更: 亜熱帯多雨林の画像を代用
+            '亜熱帯多雨林': { P: 2000, T: 20, description: '熱帯と温帯の間に位置する、降水量が多い常緑広葉樹林。', examples: ['ガジュマル', 'アダン', 'ヤンバルクイナ'], colors: { ground: '#228B22' }, 
+                imageSrc: 'subtropical_rainforest.jpg' }, // ★ 変更
+            '雨緑樹林': { P: 1200, T: 25, description: '乾季と雨季が明確な熱帯・亜熱帯地域に見られる、乾季に落葉する樹林。', examples: ['チーク', 'マホガニー', 'アジアゾウ'], colors: { ground: '#556B2F' }, 
+                imageSrc: 'deciduous_rainforest.jpg' }, // ★ 変更
+            '照葉樹林': { P: 1500, T: 15, description: '温暖で降水量の多い地域に発達する、光沢のある葉を持つ常緑広葉樹林。', examples: ['カシ', 'シイ', 'ツバキ', 'ニホンジカ'], colors: { ground: '#38761D' }, 
+                imageSrc: 'laurel_forest.jpg' }, // ★ 変更
+            '夏緑樹林': { P: 1200, T: 10, description: '四季があり冬に落葉する広葉樹が優占する温帯林。', examples: ['ブナ', 'カエデ', 'ナラ', 'クマ'], colors: { ground: '#8B4513' }, 
+                imageSrc: 'summergreen_forest.jpg' }, // ★ 変更
+            '硬葉樹林': { P: 700, T: 15, description: '夏に乾燥し冬に雨が降る地中海性気候地域に見られる、硬い葉を持つ樹林。', examples: ['オリーブ', 'コルクガシ', 'ヤギ'], colors: { ground: '#90EE90' }, 
+                imageSrc: 'hardwood_forest.jpg' }, // ★ 変更
+            '針葉樹林': { P: 600, T: 0, description: '寒冷な地域に広がる、トウヒやモミなどの針葉樹が優占する北方林（タイガ）。', examples: ['トウヒ', 'モミ', 'ヘラジカ'], colors: { ground: '#556B2F' }, 
+                imageSrc: 'coniferous_forest.jpg' }, // ★ 変更
+            'ステップ': { P: 400, T: 15, description: '温帯の内陸部に広がる乾燥した草原。', examples: ['イネ科植物', 'キク科植物', 'ウサギ'], colors: { ground: '#DAA520' }, 
+                imageSrc: 'steppe.jpg' }, // ★ 変更
+            'サバンナ': { P: 800, T: 25, description: '季節的に雨が降る熱帯の草原。疎林と長草本が優占。', examples: ['バオバブ', 'アカシア', 'シマウマ'], colors: { ground: '#DAA520' }, 
+                imageSrc: 'savanna.jpg' }, // ★ 変更
+            'ツンドラ': { P: 300, T: -10, description: '極めて寒冷で、永久凍土が広がり、地衣類やコケ類が生育。', examples: ['地衣類', 'コケ類', 'カリブー', 'ホッキョクグマ'], colors: { ground: '#C0C0C0' }, 
+                imageSrc: 'tundra.jpg' }, // ★ 変更
+            '砂漠': { P: 100, T: 20, description: '降水量が極めて少なく、高温で、乾燥に適応した植物が生育。', examples: ['サボテン', 'アロエ', 'ラクダ', 'スナネコ'], colors: { ground: '#D2B48C' }, 
+                imageSrc: 'desert.jpg' }, // ★ 変更
+        };
+
+        const imageContainer = document.getElementById('imageContainer');
+        // ★ 追加: 画像要素
+        let imgFront = document.getElementById('biomeImageFront');
+        let imgBack = document.getElementById('biomeImageBack');
+        
+        // UI要素
+        const precSlider = document.getElementById('precipitation');
+        const tempSlider = document.getElementById('temperature');
+        const precValueSpan = document.getElementById('precValue');
+        const tempValueSpan = document.getElementById('tempValue');
+        const biomeNameDisplay = document.getElementById('biomeName');
+        const biomeDescDisplay = document.getElementById('biomeDescription');
+        const biomeExamplesDisplay = document.getElementById('biomeExamples');
+        const resetButton = document.getElementById('resetButton');
+        const randomButton = document.getElementById('randomButton');
+        const quizButton = document.getElementById('quizButton');
+        const exploreButton = document.getElementById('exploreButton');
+        const infoPanel = document.getElementById('infoPanel');
+        const resultModal = document.getElementById('resultModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalContent = document.getElementById('modalContent');
+        const modalCloseButton = document.getElementById('modalCloseButton');
+        
+        // State
+        let currentPrec = parseFloat(precSlider.value);
+        let currentTemp = parseFloat(tempSlider.value);
+
+        // PとTからバイオーム名を判定する関数
+        function determineBiome(P, T) {
+            // 優先順位: 寒冷 > 乾燥 > その他
+            if (T < -10) { // -15℃に近づくとツンドラ
+                return BIOMES_DATA['ツンドラ'];
+            }
+            if (P < 250) {
+                return BIOMES_DATA['砂漠'];
+            }
+            
+            // 熱帯 (T > 20)
+            if (T > 20) {
+                if (P > 2000) return BIOMES_DATA['熱帯多雨林'];
+                if (P > 1000) return BIOMES_DATA['雨緑樹林'];
+                if (P > 300) return BIOMES_DATA['サバンナ'];
+                return BIOMES_DATA['砂漠']; // T>20, P<300
+            }
+            // 亜熱帯・暖温帯 (T > 15)
+            if (T > 15) {
+                if (P > 1800) return BIOMES_DATA['亜熱帯多雨林'];
+                if (P > 800) return BIOMES_DATA['照葉樹林'];
+                if (P > 300) return BIOMES_DATA['ステップ'];
+                return BIOMES_DATA['砂漠'];
+            }
+            // 冷温帯 (T > 5)
+            if (T > 5) {
+                if (P > 1000) return BIOMES_DATA['夏緑樹林'];
+                if (P > 400) return BIOMES_DATA['硬葉樹林'];
+                return BIOMES_DATA['ステップ'];
+            }
+            // 亜寒帯 (T > -10)
+            if (T > -10) {
+                if (P > 400) return BIOMES_DATA['針葉樹林'];
+                return BIOMES_DATA['ツンドラ']; // Tが-10~5でPが少ない
+            }
+            
+            return BIOMES_DATA['ツンドラ']; // デフォルトフォールバック (-10以下)
+        }
+        
+        // ★ 追加: バイオーム名を取得するヘルパー関数
+        function getBiomeName(biomeData) {
+            for (const key in BIOMES_DATA) {
+                if (BIOMES_DATA[key].description === biomeData.description) {
+                    return key;
+                }
+            }
+            return '不明';
+        }
+        
+        // ★ 追加: 画像をクロスフェードで更新する関数
+        let isFading = false;
+        let currentImageSrc = ''; // 現在表示中の画像パスを追跡
+        
+        function updateBiomeImage(newImageSrc) {
+            // 新しい画像が現在表示中のものと同じ、またはフェード中なら何もしない
+            if (newImageSrc === currentImageSrc || isFading) {
+                return;
+            }
+            
+            currentImageSrc = newImageSrc; // 表示する画像パスを更新
+            isFading = true;
+            
+            // 1. 背面(Back)のimgタグに新しい画像を設定
+            imgBack.src = newImageSrc;
+            
+            // 2. 背面(Back)をフェードイン
+            imgBack.style.opacity = 1;
+            // 3. 前面(Front)をフェードアウト
+            imgFront.style.opacity = 0;
+
+            // 4. アニメーション終了後 (0.5秒) に参照を入れ替える
+            setTimeout(() => {
+                // Front と Back のDOM参照を入れ替える
+                [imgFront, imgBack] = [imgBack, imgFront];
+                isFading = false;
+            }, 500); // CSSのtransition時間と合わせる
+        }
+
+
+        // ===============================================
+        // Gemini API 関連ロジック 
+        // ===============================================
+
+        const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+        const API_KEY = ""; // Canvasが実行時に提供
+
+        async function callGeminiApi(payload, retries = 3) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429 && i < retries - 1) {
+                            const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            continue;
+                        }
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    if (i === retries - 1) {
+                        console.error("Gemini API call failed after multiple retries:", error);
+                        throw new Error("API呼び出しに失敗しました。時間をおいて再試行してください。");
+                    }
+                }
+            }
+        }
+        
+        function showLoadingModal(title, message) {
+            modalTitle.textContent = title;
+            modalContent.innerHTML = `<div class="loader mx-auto"></div><p class="text-center mt-4">${message}</p>`;
+            resultModal.showModal();
+        }
+
+        quizButton.addEventListener('click', async () => {
+            const biomeName = biomeNameDisplay.textContent;
+            const biomeDesc = biomeDescDisplay.textContent;
+            showLoadingModal('✨ バイオーム知識クイズ', `${biomeName}に関する4択クイズを生成中です...`);
+            quizButton.disabled = true;
+            exploreButton.disabled = true;
+
+            const systemPrompt = `あなたは高校生向けの生物の先生です。提供されたバイオーム名と説明に基づき、その知識を確認するための、難易度が高すぎない4択の多肢選択クイズを1問、日本語で生成してください。回答は必ず提供されたJSONスキーマに従ってください。`;
+            const quizSchema = {
+                type: "OBJECT",
+                properties: {
+                    question: { type: "STRING", description: "クイズの質問文。" },
+                    options: {
+                        type: "ARRAY",
+                        items: { type: "STRING" },
+                        description: "必ず4つの選択肢を配列で生成してください。"
+                    },
+                    correctAnswerIndex: { type: "NUMBER", description: "正解の選択肢のインデックス (0〜3)。" },
+                    explanation: { type: "STRING", description: "正解の理由と、なぜ他の選択肢が違うのかについての簡単な解説。" }
+                },
+                propertyOrdering: ["question", "options", "correctAnswerIndex", "explanation"]
+            };
+            const userQuery = `バイオーム名: ${biomeName}\n説明: ${biomeDesc}\nこの情報に基づき、4択クイズを1問作成してください。`;
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: quizSchema,
+                },
+            };
+            try {
+                const result = await callGeminiApi(payload);
+                const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!jsonText) throw new Error("クイズ生成に失敗しました。");
+                const quiz = JSON.parse(jsonText);
+                if (!quiz.options || quiz.options.length !== 4 || quiz.correctAnswerIndex === undefined) {
+                    throw new Error("クイズの形式が正しくありません。");
+                }
+                const html = `
+                    <div class="space-y-4">
+                        <p class="font-semibold text-lg text-indigo-800">問題:</p>
+                        <p class="bg-indigo-50 p-3 rounded-lg border-l-4 border-indigo-400">${quiz.question}</p>
+                        <p class="font-semibold text-md text-gray-700 mt-4">選択肢:</p>
+                        <ul class="list-decimal list-inside space-y-2 ml-2 text-gray-700">
+                            ${quiz.options.map((opt, index) => `<li>${opt}</li>`).join('')}
+                        </ul>
+                        <details class="p-4 bg-green-50 rounded-lg border-l-4 border-green-400 mt-4">
+                            <summary class="cursor-pointer font-bold text-green-700 text-base">答えと解説を見る</summary>
+                            <p class="mt-2 text-green-900"><strong>正解:</strong> ${quiz.options[quiz.correctAnswerIndex]}</p>
+                            <p class="mt-1 text-green-900"><strong>解説:</strong> ${quiz.explanation}</p>
+                        </details>
+                    </div>
+                `;
+                modalContent.innerHTML = html;
+            } catch (error) {
+                modalContent.innerHTML = `<p class="text-red-600">エラー: ${error.message}</p>`;
+            } finally {
+                quizButton.disabled = false;
+                exploreButton.disabled = false;
+            }
+        });
+
+        exploreButton.addEventListener('click', async () => {
+            const biomeName = biomeNameDisplay.textContent;
+            showLoadingModal('✨ バイオーム探求アシスタント', `${biomeName}のリアルな情報を検索中です...`);
+            quizButton.disabled = true;
+            exploreButton.disabled = true;
+            const systemPrompt = `あなたは、高校生がバイオーム学習を深めるための探求アシスタントです。提供されたバイオーム名に基づき、以下の3つの項目のみについて、インターネットで検索し、簡潔な箇条書きでまとめてください。
+1. 代表的な国や地域
+2. そこに生息する固有種またはキーストーン種
+3. その地域で発生している人間活動が関わる環境問題
+情報は必ず日本語で、箇条書きの形式で出力してください。`;
+            const userQuery = `バイオーム名: ${biomeName}。\nこのバイオームについて、指定された3つの項目（代表地域、固有種/キーストーン種、人間活動による環境問題）を調べてください。`;
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: { parts: [{ systemPrompt }] },
+            };
+            try {
+                const result = await callGeminiApi(payload);
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "情報が見つかりませんでした。";
+                let sourcesHtml = '';
+                const groundingMetadata = result.candidates?.[0]?.groundingMetadata;
+                if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                    const sources = groundingMetadata.groundingAttributions
+                        .map(attribution => ({
+                            uri: attribution.web?.uri,
+                            title: attribution.web?.title,
+                        }))
+                        .filter(source => source.uri && source.title)
+                        .slice(0, 3); 
+                    if (sources.length > 0) {
+                        sourcesHtml = `<div class="mt-4 pt-3 border-t text-xs text-gray-500">
+                            <p class="font-semibold mb-1">参考情報:</p>
+                            ${sources.map((s, index) => 
+                                `<p>${index + 1}. <a href="${s.uri}" target="_blank" class="text-indigo-500 hover:text-indigo-700">${s.title}</a></p>`
+                            ).join('')}
+                        </div>`;
+                    }
+                }
+                const formattedText = text
+                                          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                          .replace(/^1\.\s(.*?)$/gm, '<h3>1. 代表的な国や地域</h3><p>$1</p>')
+                                          .replace(/^2\.\s(.*?)$/gm, '<h3>2. 固有種・キーストーン種</h3><p>$1</p>')
+                                          .replace(/^3\.\s(.*?)$/gm, '<h3>3. 人間活動による環境問題</h3><p>$1</p>')
+                                          .replace(/\* (.*)/g, '<li>$1</li>')
+                                          .replace(/<li>/g, '<li class="ml-4">')
+                                          .replace(/<h3>/g, '<h3 class="text-md font-semibold text-indigo-700 mt-3 mb-1">');
+                modalContent.innerHTML = `
+                    <div class="prose max-w-none text-gray-800">
+                        ${formattedText}
+                    </div>
+                    ${sourcesHtml}
+                `;
+            } catch (error) {
+                modalContent.innerHTML = `<p class="text-red-600">エラー: ${error.message}</p>`;
+            } finally {
+                quizButton.disabled = false;
+                exploreButton.disabled = false;
+            }
+        });
+
+
+        // ===============================================
+        // イベントハンドラ (スライダー対応)
+        // ===============================================
+
+        // ★ 更新: スライダーの変更ロジック
+        function handleSliderChange() {
+            currentPrec = parseFloat(precSlider.value);
+            currentTemp = parseFloat(tempSlider.value);
+            
+            // UIのリアルタイム更新
+            precValueSpan.textContent = currentPrec;
+            tempValueSpan.textContent = currentTemp.toFixed(1);
+
+            // バイオームの決定
+            const newBiomeData = determineBiome(currentPrec, currentTemp);
+            const biomeName = getBiomeName(newBiomeData);
+            
+            // 情報パネルの更新
+            if (biomeNameDisplay.textContent !== biomeName) {
+                biomeNameDisplay.textContent = biomeName;
+                biomeDescDisplay.textContent = newBiomeData.description;
+                biomeExamplesDisplay.textContent = newBiomeData.examples.join(', ');
+                infoPanel.style.borderColor = newBiomeData.colors.ground; // 色はデータに残しておく
+            }
+
+            // ★ マップポイントの代わりに画像更新を呼び出す
+            updateBiomeImage(newBiomeData.imageSrc);
+        }
+
+        // 初期化とイベントリスナーの設定
+        function initialize() {
+            // スライダーイベントリスナー
+            precSlider.addEventListener('input', handleSliderChange);
+            tempSlider.addEventListener('input', handleSliderChange);
+
+            // リセットボタン (初期値: 夏緑樹林あたり)
+            resetButton.addEventListener('click', () => {
+                precSlider.value = 1500;
+                tempSlider.value = 10;
+                handleSliderChange();
+            });
+
+            // ランダム設定ボタン
+            randomButton.addEventListener('click', () => {
+                // 新しい範囲に対応
+                precSlider.value = Math.floor(Math.random() * 401) * 10; // 0-4000
+                tempSlider.value = (Math.random() * 45 - 15).toFixed(1); // -15.0 - 30.0
+                handleSliderChange();
+            });
+            
+            // モーダルクローズ
+            modalCloseButton.addEventListener('click', () => {
+                resultModal.close();
+            });
+            
+            // ★ ページロード時に初回実行
+            handleSliderChange();
+        }
+
+        // ページロード完了後に初期化
+        window.onload = initialize;
+
+    </script>
+</body>
+</html>
